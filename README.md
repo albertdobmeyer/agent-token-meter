@@ -7,7 +7,7 @@ Claude Code bills by tokens, and conversations accumulate cost **quadratically**
 Token Meter watches your Claude Code session and shows you the burn rate, acceleration, and estimated calls until auto-compaction — so you know *when* to act, not just how much you've spent after the fact.
 
 ```
- ⚡ Claude Code Token Meter v0.3.0
+ ⚡ Claude Code Token Meter v1.0.0
 ────────────────────────────────────────────────────
 
  model      claude-opus-4-6
@@ -128,6 +128,62 @@ node token-meter.mjs
 ```
 
 **Requirements:** Node.js 18+ (no other dependencies).
+
+## Claude integration (threshold hooks)
+
+The token meter can nudge Claude directly inside your conversation. Instead of polling or injecting on every turn, it uses **threshold triggers** — Claude gets a one-line system reminder only when context crosses a critical boundary. Zero tokens wasted otherwise.
+
+### Install hooks
+
+```bash
+npx claude-code-token-meter --install-hooks
+```
+
+This copies a lightweight hook script to `~/.claude/hooks/` and registers it as a `PostToolUse` hook in `~/.claude/settings.json`. The hook fires after every tool call but **stays silent unless a threshold is crossed**.
+
+### What Claude sees
+
+| Threshold | Nudge |
+|---|---|
+| **50%** | `[Token Meter] Context 50%. Plan a handoff point — write key decisions to a file.` |
+| **75%** | `[Token Meter] Context 75%. Write your plan/findings to a file now. Prepare to /clear.` |
+| **90%** | `[Token Meter] Context 90%. ~$X.XX/call context tax. /clear now to avoid quadrupled costs.` |
+| **Compaction** | `[Token Meter] Compaction detected (Nx). Context reset to X%. Thresholds re-armed.` |
+
+Each threshold fires **once per session**. When auto-compaction happens, thresholds above the new fill level are re-armed.
+
+### How it works
+
+The hook script (`~/.claude/hooks/token-meter-hook.mjs`) runs in ~20ms:
+
+1. Finds the active session JSONL file
+2. Parses it for current context size and model
+3. Computes fill % against the model's context limit
+4. Checks against thresholds stored in a tiny state file
+5. If no threshold crossed — exits silently (no output, zero tokens injected)
+6. If a threshold is crossed — emits one line via `additionalContext`
+
+State is tracked in `~/.claude/token-meter-hook-state.json` to prevent re-firing.
+
+### Uninstall hooks
+
+```bash
+npx claude-code-token-meter --uninstall-hooks
+```
+
+Removes the hook script, state file, and settings.json entry. Your existing hooks are preserved.
+
+### Two tools, two purposes
+
+| | Dashboard (`npx claude-code-token-meter`) | Hooks (`--install-hooks`) |
+|---|---|---|
+| **Audience** | You (the developer) | Claude (the AI) |
+| **Display** | Full real-time dashboard in split terminal | One-line system reminder |
+| **Frequency** | Continuous live updates | Only at 50/75/90% thresholds |
+| **Token cost** | Zero (separate process) | ~4 lines total across entire session |
+| **Purpose** | Monitor burn rate, plan workflow | Nudge Claude to be token-frugal |
+
+Use both together: the dashboard for your situational awareness, the hooks for Claude's.
 
 ## Usage
 

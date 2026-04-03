@@ -14,8 +14,10 @@
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { fileURLToPath } from "url";
 
-const VERSION = "0.3.0";
+const VERSION = "1.0.0";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ── Pricing ($/M tokens) ──────────────────────────────────────────────
 const PRICING = {
@@ -566,8 +568,19 @@ ${BOLD}Options:${RESET}
   --all              Show all sessions summary
   --project <name>   Filter by project name (substring match)
   --limit <n>        Max sessions to show in --all (default: 20)
+  --install-hooks    Install threshold hooks into Claude Code
+  --uninstall-hooks  Remove threshold hooks
   --help, -h         Show this help
   --version, -v      Show version
+
+${BOLD}Hooks (Claude integration):${RESET}
+  Threshold hooks inject a one-line nudge into Claude's context
+  when your session crosses 50%, 75%, or 90% context fill.
+  Each fires once. Compaction re-arms them. Zero tokens wasted
+  when below thresholds.
+
+  Install:    npx claude-code-token-meter --install-hooks
+  Uninstall:  npx claude-code-token-meter --uninstall-hooks
 
 ${BOLD}What it shows:${RESET}
   Context fill bar with percentage
@@ -592,6 +605,81 @@ ${BOLD}Setup:${RESET}
 `);
 }
 
+// ── Hook installer ───────────────────────────────────────────────────
+
+function installHooks() {
+  const hooksDir = path.join(os.homedir(), ".claude", "hooks");
+  const hookDest = path.join(hooksDir, "token-meter-hook.mjs");
+  const hookSrc = path.join(__dirname, "hook.mjs");
+  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+
+  if (!fs.existsSync(hookSrc)) {
+    console.error(`${RED}hook.mjs not found at ${hookSrc}${RESET}`);
+    console.error(`${DIM}Try reinstalling: npm install -g claude-code-token-meter${RESET}`);
+    process.exit(1);
+  }
+
+  // 1. Copy hook script to stable location
+  fs.mkdirSync(hooksDir, { recursive: true });
+  fs.copyFileSync(hookSrc, hookDest);
+
+  // 2. Merge into settings.json
+  let settings = {};
+  try { settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")); } catch {}
+
+  if (!settings.hooks) settings.hooks = {};
+  if (!settings.hooks.PostToolUse) settings.hooks.PostToolUse = [];
+
+  // Remove any existing token-meter hook entry
+  settings.hooks.PostToolUse = settings.hooks.PostToolUse.filter(
+    h => !JSON.stringify(h).includes("token-meter")
+  );
+
+  // Add hook — use forward slashes for bash compatibility
+  const hookCmd = `node "${hookDest.replace(/\\/g, "/")}"`;
+  settings.hooks.PostToolUse.push({
+    matcher: "",
+    hooks: [{ type: "command", command: hookCmd }],
+  });
+
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+  console.log(`\n${GREEN}✓${RESET} Token Meter hooks installed\n`);
+  console.log(`  ${DIM}Hook:${RESET}     ${hookDest}`);
+  console.log(`  ${DIM}Config:${RESET}   ${settingsPath}`);
+  console.log(`\n  Claude receives a one-line nudge when context crosses:`);
+  console.log(`    ${YELLOW}50%${RESET}  — plan a handoff point`);
+  console.log(`    ${YELLOW}75%${RESET}  — write findings to file, prepare to /clear`);
+  console.log(`    ${RED}90%${RESET}  — /clear now (shows context tax $/call)`);
+  console.log(`\n  Each fires ${BOLD}once${RESET} per session. Compaction re-arms them.`);
+  console.log(`  To remove: ${CYAN}npx claude-code-token-meter --uninstall-hooks${RESET}\n`);
+}
+
+function uninstallHooks() {
+  const hookDest = path.join(os.homedir(), ".claude", "hooks", "token-meter-hook.mjs");
+  const statePath = path.join(os.homedir(), ".claude", "token-meter-hook-state.json");
+  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+
+  // Remove hook file and state
+  try { fs.unlinkSync(hookDest); } catch {}
+  try { fs.unlinkSync(statePath); } catch {}
+
+  // Remove from settings.json
+  try {
+    const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    if (settings.hooks?.PostToolUse) {
+      settings.hooks.PostToolUse = settings.hooks.PostToolUse.filter(
+        h => !JSON.stringify(h).includes("token-meter")
+      );
+      if (settings.hooks.PostToolUse.length === 0) delete settings.hooks.PostToolUse;
+      if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+    }
+  } catch {}
+
+  console.log(`\n${GREEN}✓${RESET} Token Meter hooks uninstalled\n`);
+}
+
 // ── CLI ───────────────────────────────────────────────────────────────
 function main() {
   const args = process.argv.slice(2);
@@ -603,6 +691,16 @@ function main() {
 
   if (args.includes("--version") || args.includes("-v")) {
     console.log(VERSION);
+    return;
+  }
+
+  if (args.includes("--install-hooks")) {
+    installHooks();
+    return;
+  }
+
+  if (args.includes("--uninstall-hooks")) {
+    uninstallHooks();
     return;
   }
 

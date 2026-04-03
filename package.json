@@ -1,7 +1,7 @@
 {
   "name": "claude-code-token-meter",
-  "version": "0.3.0",
-  "description": "Zero-dependency burn-rate monitor for Claude Code. Context tax, /clear savings, workflow phases, acceleration, and compaction ETA — all in real-time.",
+  "version": "1.0.0",
+  "description": "Zero-dependency burn-rate monitor for Claude Code with threshold hooks. Context tax, /clear savings, workflow phases, acceleration, compaction ETA, and automatic nudges at 50/75/90% context fill.",
   "type": "module",
   "bin": {
     "claude-code-token-meter": "./token-meter.mjs"
@@ -12,6 +12,7 @@
   },
   "files": [
     "token-meter.mjs",
+    "hook.mjs",
     "README.md",
     "LICENSE"
   ],
