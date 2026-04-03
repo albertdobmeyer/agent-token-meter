@@ -1,0 +1,37 @@
+{
+  "name": "claude-code-token-meter",
+  "version": "0.3.0",
+  "description": "Zero-dependency burn-rate monitor for Claude Code. Context tax, /clear savings, workflow phases, acceleration, and compaction ETA — all in real-time.",
+  "type": "module",
+  "bin": {
+    "claude-code-token-meter": "./token-meter.mjs"
+  },
+  "scripts": {
+    "start": "node token-meter.mjs",
+    "all": "node token-meter.mjs --all"
+  },
+  "files": [
+    "token-meter.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "tokens",
+    "monitoring",
+    "burn-rate",
+    "context-window",
+    "cost-tracking",
+    "developer-tools",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YOUR_USERNAME/claude-code-token-meter"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}
