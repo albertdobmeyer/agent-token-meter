@@ -122,7 +122,7 @@ npx claude-code-token-meter
 Or clone and run directly:
 
 ```bash
-git clone https://github.com/gitgoodordietrying/claude-code-token-meter
+git clone https://github.com/albertdobmeyer/claude-code-token-meter
 cd claude-code-token-meter
 node token-meter.mjs
 ```
