@@ -11,7 +11,7 @@ Agent Token Meter watches your coding agent's session and shows you the burn rat
 ![Agent Token Meter dashboard](https://raw.githubusercontent.com/albertdobmeyer/agent-token-meter/main/agent-token-meter-terminal-screenshot.png)
 
 ```
- Agent Token Meter v1.1.0 · Claude Code · 32891718
+ Agent Token Meter v1.1.0 · Claude Code · B--A5DS-HQ-agent-token-meter · 32891718
 ════════════════════════════════════════════════════════════
  MULTIPLIER   ×7.6 ↑        $0.52 now   $0.04 fresh
  BUILD — productive zone · context 22% · reset in ~442
@@ -125,10 +125,13 @@ Use both together: the dashboard for your situational awareness, the hooks for t
 Run in a **split terminal pane** alongside your coding agent:
 
 ```bash
-# Auto-detect agent and watch the most recent session (auto-follows as you switch terminals)
+# Scoped to current project by default — watches sessions in this cwd only
 npx agent-token-meter
 
-# List sessions active in the last 10 min
+# Watch any session machine-wide (pre-1.2 behavior)
+npx agent-token-meter --all-projects
+
+# List sessions active in the last 10 min (scoped to cwd unless --all-projects)
 npx agent-token-meter --sessions
 
 # Lock to a specific session by short id or path (disables auto-follow)
@@ -146,15 +149,49 @@ npx agent-token-meter --agents
 # List all sessions ever (cost summary)
 npx agent-token-meter --all
 
-# Filter by project
+# Filter by project name substring
 npx agent-token-meter --project augustus-trading
+```
+
+### Which session is being watched?
+
+The meter watches **one session at a time, scoped to your current working directory by default.** Launch it from `B:\A5DS-HQ\agent-token-meter` and it only considers sessions in that project — never a newer one from an unrelated repo. It derives the project directory from `cwd` using Claude Code's own naming scheme (replace `/`, `\`, `:` each with `-`: `B:\A5DS-HQ\agent-token-meter` → `B--A5DS-HQ-agent-token-meter`).
+
+The dashboard header shows both the project directory name and the short session id:
+
+```
+Agent Token Meter v1.1.0 · Claude Code · B--A5DS-HQ-agent-token-meter · 6cfb4866
+```
+
+This is the primary disambiguation signal — you match the project string (with the drive letter and path segments) against your terminal's `cwd` to confirm the numbers belong to the conversation you're thinking about. The short session id is the tiebreaker if multiple terminals are open in the same project; Claude Code's `/status` command shows the same id.
+
+A transient cyan line at the **bottom** of the dashboard cycles through 2–4 startup slides (each ~4–5s, then the line goes quiet) so the numbers above never shift:
+
+| Slide | When it shows |
+|---|---|
+| `no sessions in cwd (<project>) · watching newest globally · --all-projects to keep this mode` | You launched from a directory with no Claude Code sessions — fell back to global scan |
+| `watching: <cwd or project> · <short id>` | Always |
+| `follow mode on · switches to newest in this project after 30s idle` | Default mode |
+| `+N other active in this project · --sessions to list · --session <id> to pin` | Multiple sessions open in the same project |
+| `pinned to <id> · auto-follow off` | `--no-follow` or `--session` is active |
+| `→ switched to <project> · <id>` | Auto-follow just jumped (one-shot notice) |
+
+Escape hatches:
+
+```bash
+npx agent-token-meter --all-projects        # watch any session machine-wide
+npx agent-token-meter --sessions            # list sessions active in last 10 min
+npx agent-token-meter --session 6cfb4866    # lock to one by short id
+npx agent-token-meter --no-follow           # pin to initial pick, never switch
 ```
 
 ### Multiple Claude Code terminals
 
-If you run more than one Claude Code instance at a time, the meter auto-follows the most recently active session by default. When you switch terminals and work there for 30 seconds or more, the meter switches with you and shows a one-line notice at the top. The header always shows the project and short session id of what's currently being watched — so you can tell at a glance whether the numbers belong to the conversation you're thinking about.
+With cwd-scoping, you can safely run one meter per project in separate terminal panes — they won't stomp on each other. Inside a single project, if you have two Claude Code instances running (e.g. a main chat and a sub-agent), auto-follow switches between them after 30 seconds of local idle on the current one. Cross-project switching only happens if you pass `--all-projects`.
 
-Use `--sessions` to list active sessions, `--session <id>` to lock to one, or `--no-follow` to pin to the initial pick.
+**Orphan protection:** the meter polls `process.ppid` every 5 seconds and exits if the launching shell is gone. It also exits on stdin end/close. On Windows this fixes the long-standing problem where killing the `npx` wrapper leaves the grandchild `node.exe` running forever — closing your terminal now cleanly takes the meter down with it.
+
+**For agents:** if your agent reads the meter output (e.g. via `tee` to a log file), it can compare the short session id in the header against its own session file to confirm the numbers belong to *its* conversation. A mismatch means the meter is watching a sibling session.
 
 ### Terminal setup
 

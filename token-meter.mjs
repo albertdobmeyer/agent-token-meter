@@ -131,6 +131,13 @@ function bar(pct, width = 30) {
   return `${color}${"█".repeat(filled)}${DIM}${"░".repeat(empty)}${RESET}`;
 }
 
+// Claude Code encodes a working directory into its project subdirectory
+// by replacing `/`, `\`, and `:` each with `-`. Verified against real
+// dirs: B:\A5DS-HQ\agent-token-meter → B--A5DS-HQ-agent-token-meter.
+function cwdToProjectName(cwd) {
+  return cwd.replace(/[/\\:]/g, "-");
+}
+
 // ── Agent resolution ─────────────────────────────────────────────────
 function resolveAgent(args) {
   // 1. Explicit --agent flag
@@ -235,7 +242,7 @@ function providerLabel(key, labels) {
 }
 
 // ── Session discovery ─────────────────────────────────────────────────
-function findSessions(projectFilter, profile) {
+function findSessions(projectFilter, profile, opts = {}) {
   const projectsDir = profile.sessionDir();
   const results = [];
 
@@ -248,8 +255,12 @@ function findSessions(projectFilter, profile) {
     return results;
   }
 
+  const matchFilter = opts.exact
+    ? (proj) => proj === projectFilter
+    : (proj) => proj.toLowerCase().includes(projectFilter.toLowerCase());
+
   for (const proj of projects) {
-    if (projectFilter && !proj.toLowerCase().includes(projectFilter.toLowerCase())) continue;
+    if (projectFilter && !matchFilter(proj)) continue;
     const projPath = path.join(projectsDir, proj);
     let stat;
     try { stat = fs.statSync(projPath); } catch { continue; }
@@ -587,12 +598,18 @@ function renderDashboard(metrics, session, rc, profile, hud = {}) {
     ? `${BG_RED}${WHITE}${BOLD} ${multText} ${RESET}`
     : `${mc}${BOLD}${multText}${RESET}`;
 
-  // Header — just agent + short session id, no mangled project path
+  // Header — agent + (truncated) project dir + short session id.
+  // Users match the project dir eyeball-wise against their terminal's
+  // cwd to confirm the numbers belong to the conversation they mean.
   const shortId = sessionShortId(session?.filePath);
   const sessionTag = shortId ? ` ${DIM}·${RESET} ${DIM}${shortId}${RESET}` : "";
-  const header = `${BOLD}${CYAN} Agent Token Meter ${RESET}${DIM}v${VERSION}${RESET} ${DIM}·${RESET} ${DIM}${profile.name}${RESET}${sessionTag}`;
+  const projRaw = session?.project || "";
+  const proj = projRaw.length > 30 ? "…" + projRaw.slice(-29) : projRaw;
+  const projTag = proj ? ` ${DIM}·${RESET} ${DIM}${proj}${RESET}` : "";
+  const header = `${BOLD}${CYAN} Agent Token Meter ${RESET}${DIM}v${VERSION}${RESET} ${DIM}·${RESET} ${DIM}${profile.name}${RESET}${projTag}${sessionTag}`;
 
-  // Optional transient notice (e.g., auto-follow switched sessions)
+  // Optional transient notice — rendered at the very bottom so the
+  // numbers above don't shift when it appears or fades out.
   const noticeLine = hud.notice ? ` ${CYAN}${hud.notice}${RESET}` : null;
 
   const W = 60;
@@ -635,7 +652,6 @@ function renderDashboard(metrics, session, rc, profile, hud = {}) {
   const lines = [
     "",
     header,
-    noticeLine,
     sepHeavy,
     ` ${DIM}MULTIPLIER${RESET}   ${multStyled}${accelArrow ? " " + accelArrow : ""}        ${BOLD}${fmtCost(m.avgCostPerTurn)}${RESET} ${DIM}now${RESET}   ${DIM}${fmtCost(m.baselineCostPerCall)} fresh${RESET}`,
     ` ${buildPhaseBanner(m, cmds)}`,
@@ -652,14 +668,15 @@ function renderDashboard(metrics, session, rc, profile, hud = {}) {
     altLine,
     sepHeavy,
     `${DIM} Watching · Ctrl+C to exit${RESET}`,
+    noticeLine,
   ].filter(l => l != null);
 
   process.stdout.write(CLR_SCR);
   process.stdout.write(lines.join("\n") + "\n");
 }
 
-function renderAllSessions(projectFilter, limit, rc, profile) {
-  const sessions = findSessions(projectFilter, profile);
+function renderAllSessions(projectFilter, limit, rc, profile, exact = false) {
+  const sessions = findSessions(projectFilter, profile, { exact });
   if (sessions.length === 0) {
     console.log(`\n${DIM}No sessions found.${RESET}\n`);
     return;
@@ -720,6 +737,7 @@ ${BOLD}Options:${RESET}
   --session <id|path>  Watch a specific session (disables auto-follow)
   --no-follow          Pin to initial session; don't auto-switch
   --project <name>     Filter by project name (substring match)
+  --all-projects       Watch any session machine-wide (default: cwd scope)
   --limit <n>          Max sessions to show in --all (default: 20)
   --install-hooks      Install threshold hooks (agent-specific)
   --uninstall-hooks    Remove threshold hooks
@@ -727,10 +745,16 @@ ${BOLD}Options:${RESET}
   --version, -v        Show version
 
 ${BOLD}Multi-instance:${RESET}
-  By default the meter auto-follows the most recently active session.
-  If you switch to a different ${profile ? profile.name : "agent"} terminal and work there
-  for 30s+, the meter switches with you. Use --no-follow to pin,
-  or --session <id> to lock to a specific one.
+  By default the meter scopes to the project matching your current
+  working directory — so launching it in terminal A only ever watches
+  sessions for that project, never a newer one from terminal B in a
+  different repo. Auto-follow switches between sessions inside the
+  same project after 30s of local idle. Escape hatches:
+    --all-projects       watch any session machine-wide
+    --no-follow          pin to the initial session
+    --session <id>       lock to one specific session
+  The meter self-exits if its launching shell dies, so orphaned
+  processes don't accumulate if you close the terminal without Ctrl+C.
 
 ${BOLD}Hooks (threshold nudges):${RESET}
   Threshold hooks inject a one-line nudge into the agent's context
@@ -910,21 +934,35 @@ function main() {
   // Load config and resolve providers
   const rc = resolveConfig(loadConfig(profile), profile);
 
-  if (args.includes("--all")) {
-    renderAllSessions(projectFilter, limit, rc, profile);
-    return;
-  }
-
-  if (args.includes("--sessions")) {
-    renderActiveSessions(profile, rc);
-    return;
-  }
-
   // Determine target file and whether to auto-follow
   let targetFile;
   let followMode = !args.includes("--no-follow");
   const skipArgs = ["--agent", "--project", "--limit", "--session"];
   const positional = args.filter((a, i) => !a.startsWith("--") && !skipArgs.includes(args[i - 1]));
+
+  // ── cwd-scoping ──
+  // Default: only watch sessions whose project dir matches the current
+  // working directory. Prevents accidentally metering an unrelated
+  // Claude Code session from another terminal.
+  //   opt-out:      --all-projects
+  //   overridden:   --project, --session, positional file arg
+  const allProjectsFlag = args.includes("--all-projects");
+  const explicitScope = allProjectsFlag || !!projectFilter || !!sessionArg || positional.length > 0;
+  const cwdProject = !explicitScope ? cwdToProjectName(process.cwd()) : null;
+  const cwdProjectExists = !!cwdProject
+    && fs.existsSync(path.join(profile.sessionDir(), cwdProject));
+  const effectiveFilter = cwdProjectExists ? cwdProject : projectFilter;
+  const effectiveExact = !!cwdProjectExists;
+
+  if (args.includes("--all")) {
+    renderAllSessions(effectiveFilter, limit, rc, profile, effectiveExact);
+    return;
+  }
+
+  if (args.includes("--sessions")) {
+    renderActiveSessions(profile, rc, effectiveFilter, effectiveExact);
+    return;
+  }
 
   if (sessionArg) {
     // Explicit --session disables auto-follow
@@ -934,10 +972,13 @@ function main() {
     followMode = false;
     targetFile = path.resolve(positional[0]);
   } else {
-    const sessions = findSessions(projectFilter, profile);
+    const sessions = findSessions(effectiveFilter, profile, { exact: effectiveExact });
     if (sessions.length === 0) {
       console.error(`${RED}No ${profile.name} session files found.${RESET}`);
       console.error(`${DIM}Expected logs in: ${profile.sessionDir()}${RESET}`);
+      if (cwdProject && !cwdProjectExists) {
+        console.error(`${DIM}(cwd scope: ${cwdProject} — not found; pass --all-projects to watch any session)${RESET}`);
+      }
       process.exit(1);
     }
     targetFile = sessions[0].path;
@@ -954,8 +995,8 @@ function main() {
   let metrics = computeMetrics(session, rc);
   let lastLocalChange = Date.now();
   let hud = {};
+  let noticeQueue = [];
   let noticeTimer = null;
-  renderDashboard(metrics, session, rc, profile, hud);
 
   const rerender = () => {
     try {
@@ -965,11 +1006,50 @@ function main() {
     } catch { /* mid-write, skip */ }
   };
 
-  const showNotice = (text, ms = 6000) => {
-    hud = { notice: text };
-    if (noticeTimer) clearTimeout(noticeTimer);
-    noticeTimer = setTimeout(() => { hud = {}; rerender(); }, ms);
+  // Slide-queue notices — fade and advance on a timer. Each slide gets
+  // a full bottom line so messages don't have to be crammed together.
+  const playNotices = () => {
+    if (noticeTimer) { clearTimeout(noticeTimer); noticeTimer = null; }
+    if (noticeQueue.length === 0) { hud = {}; rerender(); return; }
+    const next = noticeQueue.shift();
+    hud = { notice: next.text };
+    rerender();
+    noticeTimer = setTimeout(playNotices, next.ms);
   };
+  const queueNotices = (slides) => { noticeQueue = slides.slice(); playNotices(); };
+  const showNotice = (text, ms = 6000) => queueNotices([{ text, ms }]);
+
+  // Startup slides — explain scope, follow mode, and escape hatches.
+  const ACTIVE_WINDOW_MS = 10 * 60 * 1000;
+  const startupShortId = sessionShortId(currentFile);
+  const scopeActive = cwdProjectExists;
+  const scopeWord = scopeActive ? "in this project" : "across all projects";
+  const startupSlides = [];
+  if (cwdProject && !cwdProjectExists) {
+    startupSlides.push({
+      text: `no sessions in cwd (${cwdProject}) · watching newest globally · --all-projects to keep this mode`,
+      ms: 5000,
+    });
+  }
+  const watchingLabel = scopeActive ? process.cwd() : (session.project || "global");
+  startupSlides.push({ text: `watching: ${watchingLabel} · ${startupShortId}`, ms: 4000 });
+  if (followMode) {
+    startupSlides.push({
+      text: `follow mode on · switches to newest ${scopeWord} after 30s idle`,
+      ms: 4000,
+    });
+    const activeCount = findSessions(effectiveFilter, profile, { exact: effectiveExact })
+      .filter(s => Date.now() - s.mtime < ACTIVE_WINDOW_MS).length;
+    if (activeCount > 1) {
+      startupSlides.push({
+        text: `+${activeCount - 1} other active ${scopeWord} · --sessions to list · --session <id> to pin`,
+        ms: 5000,
+      });
+    }
+  } else {
+    startupSlides.push({ text: `pinned to ${startupShortId} · auto-follow off`, ms: 4000 });
+  }
+  queueNotices(startupSlides);
 
   // Watch current file
   let watcher = null;
@@ -1006,7 +1086,7 @@ function main() {
   if (followMode) {
     followTimer = setInterval(() => {
       try {
-        const sessions = findSessions(projectFilter, profile);
+        const sessions = findSessions(effectiveFilter, profile, { exact: effectiveExact });
         if (sessions.length === 0) return;
         const newest = sessions[0];
         if (newest.path === currentFile) return;
@@ -1026,9 +1106,32 @@ function main() {
     }, 3000);
   }
 
+  // Parent-watchdog — self-exit if the launching shell dies. On Windows
+  // killing an `npx` wrapper doesn't propagate to the grandchild node
+  // process, so without this the meter would leak as an orphan after
+  // the terminal closes. process.kill(pid, 0) throws if pid is gone.
+  const ppidWatchdog = setInterval(() => {
+    const ppid = process.ppid;
+    if (!ppid || ppid === 1) return; // reparented to init — leave running
+    try { process.kill(ppid, 0); }
+    catch {
+      try { process.stdout.write(`\n${DIM}Parent process exited. Stopping meter.${RESET}\n`); } catch {}
+      process.exit(0);
+    }
+  }, 5000);
+
+  // Secondary lifecycle signal — TTY stdin closing means the controlling
+  // terminal is gone. Normal TTY stdin never emits end/close otherwise.
+  if (process.stdin.isTTY) {
+    process.stdin.on("end", () => process.exit(0));
+    process.stdin.on("close", () => process.exit(0));
+  }
+
   // Graceful exit
   process.on("SIGINT", () => {
     if (followTimer) clearInterval(followTimer);
+    if (ppidWatchdog) clearInterval(ppidWatchdog);
+    if (noticeTimer) clearTimeout(noticeTimer);
     if (watcher) { try { watcher.close(); } catch {} }
     if (pollTimer) clearInterval(pollTimer);
     process.stdout.write(`\n${DIM}Token meter stopped.${RESET}\n`);
@@ -1037,8 +1140,8 @@ function main() {
 }
 
 // ── --sessions renderer ──────────────────────────────────────────────
-function renderActiveSessions(profile, rc) {
-  const sessions = findSessions(null, profile);
+function renderActiveSessions(profile, rc, projectFilter = null, exact = false) {
+  const sessions = findSessions(projectFilter, profile, { exact });
   const now = Date.now();
   const ACTIVE_WINDOW_MS = 10 * 60 * 1000;
   const active = sessions.filter(s => now - s.mtime < ACTIVE_WINDOW_MS);
@@ -1062,7 +1165,7 @@ function renderActiveSessions(profile, rc) {
       `  ${DIM}${age.padEnd(8)}${RESET}` +
       `${String(m.userTurnCount || m.turnCount).padStart(5)}  ` +
       `${fmtCost(m.totalCost).padStart(9)}  ` +
-      `${mc}×${String(m.multiplier).padEnd(3)}${RESET} ` +
+      `${mc}×${m.multiplier.toFixed(1).padEnd(4)}${RESET} ` +
       `${(parsed.project || "").slice(0, 30).padEnd(30)} ${DIM}${sessionShortId(s.path)}${RESET}`
     );
   }
