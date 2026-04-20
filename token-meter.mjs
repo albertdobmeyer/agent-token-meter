@@ -18,7 +18,7 @@ import path from "path";
 import os from "os";
 import { fileURLToPath } from "url";
 
-const VERSION = "1.2.0";
+const VERSION = "1.2.1";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ── Agent Profiles ───────────────────────────────────────────────────
@@ -93,7 +93,13 @@ const RED = "\x1b[31m";
 const MAGENTA = "\x1b[35m";
 const WHITE = "\x1b[37m";
 const BG_RED = "\x1b[41m";
-const CLR_SCR = "\x1b[2J\x1b[H";
+// Render sequence for dashboard refresh. Uses the alt-screen buffer so
+// repeated redraws don't accumulate in terminal scrollback (a default
+// behavior of Windows Terminal that visually duplicated the header
+// across scrollback frames in pre-1.2.1).
+const ENTER_ALT = "\x1b[?1049h\x1b[?25l"; // enter alt screen + hide cursor
+const LEAVE_ALT = "\x1b[?25h\x1b[?1049l"; // show cursor + leave alt screen
+const CLR_SCR = "\x1b[H\x1b[2J";          // home cursor then clear (no scrollback push in alt screen)
 
 // ── Workflow phases ───────────────────────────────────────────────────
 const PHASES = [
@@ -598,15 +604,17 @@ function renderDashboard(metrics, session, rc, profile, hud = {}) {
     ? `${BG_RED}${WHITE}${BOLD} ${multText} ${RESET}`
     : `${mc}${BOLD}${multText}${RESET}`;
 
-  // Header — agent + (truncated) project dir + short session id.
-  // Users match the project dir eyeball-wise against their terminal's
-  // cwd to confirm the numbers belong to the conversation they mean.
+  // Header — two lines so the project dir never overflows the 60-char
+  // UI width. Line 1: agent identity + version. Line 2: project dir +
+  // short session id (the disambiguation signals). Users match the
+  // project dir eyeball-wise against their terminal's cwd.
   const shortId = sessionShortId(session?.filePath);
-  const sessionTag = shortId ? ` ${DIM}·${RESET} ${DIM}${shortId}${RESET}` : "";
   const projRaw = session?.project || "";
-  const proj = projRaw.length > 30 ? "…" + projRaw.slice(-29) : projRaw;
-  const projTag = proj ? ` ${DIM}·${RESET} ${DIM}${proj}${RESET}` : "";
-  const header = `${BOLD}${CYAN} Agent Token Meter ${RESET}${DIM}v${VERSION}${RESET} ${DIM}·${RESET} ${DIM}${profile.name}${RESET}${projTag}${sessionTag}`;
+  const proj = projRaw.length > 40 ? "…" + projRaw.slice(-39) : projRaw;
+  const header = `${BOLD}${CYAN} Agent Token Meter ${RESET}${DIM}v${VERSION}${RESET} ${DIM}·${RESET} ${DIM}${profile.name}${RESET}`;
+  const subHeader = (proj || shortId)
+    ? ` ${DIM}${[proj, shortId].filter(Boolean).join(" · ")}${RESET}`
+    : null;
 
   // Optional transient notice — rendered at the very bottom so the
   // numbers above don't shift when it appears or fades out.
@@ -652,6 +660,7 @@ function renderDashboard(metrics, session, rc, profile, hud = {}) {
   const lines = [
     "",
     header,
+    subHeader,
     sepHeavy,
     ` ${DIM}MULTIPLIER${RESET}   ${multStyled}${accelArrow ? " " + accelArrow : ""}        ${BOLD}${fmtCost(m.avgCostPerTurn)}${RESET} ${DIM}now${RESET}   ${DIM}${fmtCost(m.baselineCostPerCall)} fresh${RESET}`,
     ` ${buildPhaseBanner(m, cmds)}`,
@@ -989,6 +998,11 @@ function main() {
     process.exit(1);
   }
 
+  // Enter alt-screen buffer so the dashboard redraws in a private
+  // screen that doesn't push frames into terminal scrollback. Restored
+  // on any exit path via process.on("exit"), below.
+  process.stdout.write(ENTER_ALT);
+
   // Initial render
   let currentFile = targetFile;
   let session = parseSession(currentFile);
@@ -1114,10 +1128,7 @@ function main() {
     const ppid = process.ppid;
     if (!ppid || ppid === 1) return; // reparented to init — leave running
     try { process.kill(ppid, 0); }
-    catch {
-      try { process.stdout.write(`\n${DIM}Parent process exited. Stopping meter.${RESET}\n`); } catch {}
-      process.exit(0);
-    }
+    catch { process.exit(0); }
   }, 5000);
 
   // Secondary lifecycle signal — TTY stdin closing means the controlling
@@ -1127,15 +1138,21 @@ function main() {
     process.stdin.on("close", () => process.exit(0));
   }
 
-  // Graceful exit
+  // Universal cleanup — runs on any process.exit() including SIGINT,
+  // ppid watchdog, and stdin close. Restores the user's original
+  // terminal screen (leaves alt-screen buffer).
+  process.on("exit", () => {
+    try { process.stdout.write(LEAVE_ALT); } catch {}
+  });
+
+  // Graceful Ctrl+C
   process.on("SIGINT", () => {
     if (followTimer) clearInterval(followTimer);
     if (ppidWatchdog) clearInterval(ppidWatchdog);
     if (noticeTimer) clearTimeout(noticeTimer);
     if (watcher) { try { watcher.close(); } catch {} }
     if (pollTimer) clearInterval(pollTimer);
-    process.stdout.write(`\n${DIM}Token meter stopped.${RESET}\n`);
-    process.exit(0);
+    process.exit(0); // triggers the "exit" handler above → LEAVE_ALT
   });
 }
 
