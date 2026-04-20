@@ -11,27 +11,30 @@ Agent Token Meter watches your coding agent's session and shows you the burn rat
 ![Agent Token Meter dashboard](https://raw.githubusercontent.com/albertdobmeyer/agent-token-meter/main/agent-token-meter-terminal-screenshot.png)
 
 ```
- Agent Token Meter v1.1.0  Claude Code · my-project · 32891718
-════════════════════════════════════════════════════
-
-   ×5 per call          $0.28 each
-   ───                  (fresh call: $0.04)
-
- context   ██████████████░░░░░░░░░░░░  77%  128k of 167k
- burn      +479/call =   reset in ~80
- session   5 turns · 1h 29m · $26.57  $17.87/hr
-
-────────────────────────────────────────────────────
- CLEAR     Write handoff, then /clear. Reload with the plan file.
- /clear    saves $0.15/call  (~$2.96 over next 20)
-
- cache     95% hit  ROI +$88.34  in 7.5M · out 111.6k
- alt       Sonnet 4.6 $5.31  Kimi K2.5 $1.64
- last      128.5k · 2.6k out · tool_use
-════════════════════════════════════════════════════
+ Agent Token Meter v1.1.0 · Claude Code · 32891718
+════════════════════════════════════════════════════════════
+ MULTIPLIER   ×7.6 ↑        $0.52 now   $0.04 fresh
+ BUILD — productive zone · context 22% · reset in ~442
+════════════════════════════════════════════════════════════
+ NOW
+ context      212.5k / 967.0k         22%
+ burn         +1706 tok/call ↑
+ last turn    212.5k in · 231 out · tool_use
+────────────────────────────────────────────────────────────
+ IF YOU CLEAR
+ per call     save $0.27
+ next 20      save ~$5.48
+ steps        write handoff → /clear → reload with plan
+────────────────────────────────────────────────────────────
+ SESSION
+ spend        $75.93 · 16 turns · 11h 55m · $6.36/hr
+ cache        97% hit · saved $350.12 · 27.7M in · 286.2k out
+ alt models   Sonnet 4.6 $15.19   Kimi K2.5 $5.35
+════════════════════════════════════════════════════════════
+ Watching · Ctrl+C to exit
 ```
 
-The headline is the **×N multiplier** — how much each call costs vs. a fresh-conversation call. ×1–×2 is green, ×3 yellow, ×4+ red, ×5+ red background. At a glance from across the room, color alone tells you whether to come reset.
+The headline is the **×N.N multiplier** — how much each call costs vs. a fresh-conversation call. ×1–×2 green, ×3 yellow, ×4+ red, ×5+ red background. The second line is a phase banner that fuses status (BUILD/HANDOFF/CLEAR), context fill, and reset ETA into one scannable sentence. When context exceeds the usable limit you see `⚠ HANDOFF AND CLEAR — context N% OVER · reset overdue Nm` instead.
 
 ## Supported agents
 
@@ -178,62 +181,60 @@ Most coding agents have some form of cost or context display, but none tell you 
 
 ## Reading the display
 
-### Context bar
+### ×N.N multiplier + phase banner (the headline)
 
 ```
- context    ██████████████████░░░░░░░░░░░░ 58.2%
-            563.2k / 967.0k usable  (1.0M limit - 33.0k buffer)
+ MULTIPLIER   ×7.6 ↑        $0.52 now   $0.04 fresh
+ BUILD — productive zone · context 22% · reset in ~442
 ```
 
-The usable space is the model's context limit minus the auto-compact buffer. When you hit ~95% of usable space, auto-compaction triggers.
+The headline answers the question "should I reset?" before anything else. The multiplier is `currentContext / baseline` — per-call cost ratio vs. a fresh conversation, displayed with one decimal of precision. The arrow tracks acceleration (`↑`/`=`/`↓`). `now` is the current per-call cost; `fresh` is what a fresh-conversation call would cost.
 
-### ×N multiplier (the headline)
+The phase banner compresses state + action into one sentence: phase name (EXPLORE / BUILD / HANDOFF / CLEAR), short rationale, context fill %, reset ETA. When context has already exceeded usable, the banner switches to `⚠ HANDOFF AND CLEAR — context N% OVER · reset overdue Nm`.
 
-```
-   ×5 per call          $0.28 each
-   ───                  (fresh call: $0.04)
-```
-
-How much each call costs vs. a fresh-conversation call. Formula: `round(currentContext / baseline)`, which closely approximates the per-call cost ratio because cache-read dominates billing and scales linearly with context.
-
-Color bands:
+Color bands on the multiplier:
 - **×1–×2** green — fresh or productive, nothing to do
 - **×3** yellow — plan a handoff
 - **×4+** red — conversation history is taxing you heavily
 - **×5+** red background — stop and reset now
 
-### Burn rate + reset ETA
+### NOW — what's the current state
 
 ```
- burn      +479/call =   reset in ~80
+ context      212.5k / 967.0k         22%
+ burn         +1706 tok/call ↑
+ last turn    212.5k in · 231 out · tool_use
 ```
 
-- **Burn rate** — average context growth per API call over the last 10 calls (resets after compaction).
-- **Arrow** — `↑` accelerating (last 5 calls faster than previous 5), `↓` decelerating, `=` steady.
-- **Reset in** — estimated API calls until auto-compaction triggers. Same color bands as ×N.
+- **context** — current context size / usable limit (model limit minus the 33k auto-compact buffer) + fill %.
+- **burn** — average context growth per call over the last 10 calls. Arrow shows acceleration trend.
+- **last turn** — latest API call's context, output tokens, and stop reason. Useful for spotting which turns are driving burn.
 
-### Workflow advisor
-
-```
- CLEAR     Write handoff, then /clear. Reload with the plan file.
- /clear    saves $0.15/call  (~$2.96 over next 20)
-```
-
-- **Phase** — EXPLORE → BUILD → HANDOFF → CLEAR, based on how much of your context is conversation overhead vs. the baseline (system prompt + tools).
-- **/clear saves** — what you'd gain per call by writing a ~2k handoff file and resetting.
-
-The optimal strategy: plan in one context, write a handoff, reset, then implement from the lean handoff.
-
-### Cache + alt providers + last call
+### IF YOU CLEAR — the actionable projection
 
 ```
- cache     95% hit  ROI +$88.34  in 7.5M · out 111.6k
- alt       Sonnet 4.6 $5.31  Kimi K2.5 $1.64
- last      128.5k · 2.6k out · tool_use
+ per call     save $0.27
+ next 20      save ~$5.48
+ steps        write handoff → /clear → reload with plan
 ```
 
-- **cache** — hit rate, cache ROI (net $ saved vs. paying uncached input), total in/out tokens.
-- **alt** — what the same workload would cost on other providers. Customize via config file.
+- **per call** — what you'd save on every subsequent call by writing a ~2k handoff file and resetting.
+- **next 20** — cumulative savings over the next 20 calls.
+- **steps** — the workflow: dump a plan file, reset context, reload in a fresh session.
+
+This section only appears when `/clear` would save more than ~$0.005/call — below that, it's silent to keep the dashboard quiet.
+
+### SESSION — the post-game breakdown
+
+```
+ spend        $75.93 · 16 turns · 11h 55m · $6.36/hr
+ cache        97% hit · saved $350.12 · 27.7M in · 286.2k out
+ alt models   Sonnet 4.6 $15.19   Kimi K2.5 $5.35
+```
+
+- **spend** — total cost, user turn count, session duration, cost per hour.
+- **cache** — hit rate, cache ROI (net savings from caching), total billed input/output tokens.
+- **alt models** — what the same workload would have cost on other providers. Customize via config file.
 - **last** — most recent API call's context size, output tokens, stop reason. Useful for debugging unexpected burn.
 
 ## How it works
@@ -261,11 +262,14 @@ Built-in rates (as of April 2026):
 
 | Model | Input | Output | Cache Write | Cache Read | Context |
 |---|---|---|---|---|---|
+| **Opus 4.7** | $15/M | $75/M | $18.75/M | $1.50/M | 1M |
 | **Opus 4.6** | $15/M | $75/M | $18.75/M | $1.50/M | 1M |
 | **Sonnet 4.6** | $3/M | $15/M | $3.75/M | $0.30/M | 1M |
 | **Haiku 4.5** | $0.80/M | $4/M | $1.00/M | $0.08/M | 200K |
 | **Kimi K2.5** | $0.60/M | $3.00/M | $0.60/M | $0.15/M | 262K |
 | **Kimi K2 Thinking** | $0.60/M | $2.50/M | $0.60/M | $0.15/M | 262K |
+
+> Opus 4.7 rates mirror Opus 4.6 as a conservative default — Anthropic has kept Opus family pricing consistent. Override via `~/.claude/token-meter.json` if that changes.
 
 ### Custom providers
 

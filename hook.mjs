@@ -17,10 +17,12 @@ const COMPACT_BUFFER = 33_000;
 const STATE = path.join(os.homedir(), ".claude", "token-meter-hook-state.json");
 
 const LIMITS = {
+  "claude-opus-4-7": 1_000_000,
   "claude-opus-4-6": 1_000_000, "claude-opus-4-5": 1_000_000,
   "claude-sonnet-4-6": 1_000_000, "claude-sonnet-4-5": 200_000,
   "claude-haiku-4-5": 200_000,
 };
+const DEFAULT_LIMIT = 1_000_000;
 
 const CACHE_RATES = { opus: 1.5, sonnet: 0.3, haiku: 0.08 };
 
@@ -126,7 +128,7 @@ function usableLimit(model) {
   for (const [k, v] of Object.entries(LIMITS)) {
     if (model.startsWith(k)) return v - COMPACT_BUFFER;
   }
-  return 200_000 - COMPACT_BUFFER;
+  return DEFAULT_LIMIT - COMPACT_BUFFER;
 }
 
 function cacheRate(model) {

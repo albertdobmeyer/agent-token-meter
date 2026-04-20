@@ -33,6 +33,7 @@ const AGENTS = {
     configDir: () => path.join(os.homedir(), ".claude"),
     configFile: "token-meter.json",
     pricing: {
+      "claude-opus-4-7":   { input: 15,   output: 75,  cacheWrite: 18.75, cacheRead: 1.5  },
       "claude-opus-4-6":   { input: 15,   output: 75,  cacheWrite: 18.75, cacheRead: 1.5  },
       "claude-opus-4-5":   { input: 15,   output: 75,  cacheWrite: 18.75, cacheRead: 1.5  },
       "claude-sonnet-4-6": { input: 3,    output: 15,  cacheWrite: 3.75,  cacheRead: 0.3  },
@@ -41,13 +42,14 @@ const AGENTS = {
     },
     defaultPricing: { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 },
     contextLimits: {
+      "claude-opus-4-7":   1_000_000,
       "claude-opus-4-6":   1_000_000,
       "claude-opus-4-5":   1_000_000,
       "claude-sonnet-4-6": 1_000_000,
       "claude-sonnet-4-5":   200_000,
       "claude-haiku-4-5":    200_000,
     },
-    defaultContextLimit: 200_000,
+    defaultContextLimit: 1_000_000,
     commands: { clear: "/clear", compact: "/compact" },
     hook: {
       supported: true,
@@ -400,7 +402,10 @@ function computeMetrics(session, rc) {
 
   // ── Compaction ETA ──
   const remaining = usableContext - currentContext;
-  const turnsToCompact = burnRate > 0 ? Math.floor(remaining / burnRate) : Infinity;
+  const turnsToCompact = burnRate > 0
+    ? Math.max(0, Math.floor(remaining / burnRate))
+    : Infinity;
+  const overContext = currentContext > usableContext;
 
   // ── Cost rate ──
   const recentCosts = turnCosts.slice(-10);
@@ -429,9 +434,22 @@ function computeMetrics(session, rc) {
 
   // ── Per-call cost multiplier (current call vs fresh-conversation call) ──
   // Cache-read dominates billing and scales linearly with context, so the
-  // context-size ratio closely approximates the $/call ratio.
-  const multiplier = baseline > 0 ? Math.max(1, Math.round(currentContext / baseline)) : 1;
+  // context-size ratio closely approximates the $/call ratio. Keep one
+  // decimal so the user can distinguish ×1.2 (fresh) from ×1.8 (warming up).
+  const multiplier = baseline > 0 ? Math.max(1, currentContext / baseline) : 1;
   const baselineCostPerCall = (baseline / 1e6) * pricing.cacheRead;
+
+  // ── Reset-overdue duration (when context has already exceeded usable) ──
+  let overdueMs = 0;
+  if (overContext) {
+    for (const t of turns) {
+      if (t.contextSize > usableContext) {
+        const ts = t.timestamp ? new Date(t.timestamp).getTime() : 0;
+        if (ts > 0) overdueMs = Date.now() - ts;
+        break;
+      }
+    }
+  }
 
   let phase = PHASES[PHASES.length - 1];
   for (const p of PHASES) {
@@ -487,6 +505,7 @@ function computeMetrics(session, rc) {
     baseline, overhead, overheadPct,
     contextTaxPerCall, savedPerCall, savingsOverLookahead,
     multiplier, baselineCostPerCall,
+    overContext, overdueMs,
     phase,
     projectedCostToCompact,
     cacheWriteCost, cacheReadSavings, cacheNetSavings,
@@ -510,6 +529,42 @@ function sessionShortId(filePath) {
   return base.replace(/\.jsonl$/, "").slice(0, 8);
 }
 
+function buildPhaseBanner(m, cmds) {
+  const clearCaps = cmds.clear.replace("/", "").toUpperCase();
+  const pct = m.contextPct.toFixed(0);
+  const resetFrag = m.overContext
+    ? `${RED}${BOLD}reset overdue${m.overdueMs > 60_000 ? ` ${fmtDuration(m.overdueMs)}` : ""}${RESET}`
+    : m.turnsToCompact === Infinity
+      ? `${GREEN}no pressure${RESET}`
+      : m.turnsToCompact < 10
+        ? `${BG_RED}${WHITE}${BOLD} reset in ~${m.turnsToCompact} ${RESET}`
+        : m.turnsToCompact < 50
+          ? `${RED}reset in ~${m.turnsToCompact}${RESET}`
+          : m.turnsToCompact < 200
+            ? `${YELLOW}reset in ~${m.turnsToCompact}${RESET}`
+            : `${DIM}reset in ~${m.turnsToCompact}${RESET}`;
+
+  const contextFrag = m.overContext
+    ? `${RED}${BOLD}context ${pct}% OVER${RESET}`
+    : `${DIM}context ${pct}%${RESET}`;
+
+  switch (m.phase.name) {
+    case "EXPLORE":
+      return `${GREEN}${BOLD}EXPLORE${RESET} ${DIM}—${RESET} context is cheap · ${contextFrag} · ${resetFrag}`;
+    case "BUILD":
+      return `${CYAN}${BOLD}BUILD${RESET} ${DIM}—${RESET} productive zone · ${contextFrag} · ${resetFrag}`;
+    case "HANDOFF":
+      return `${YELLOW}${BOLD}HANDOFF${RESET} ${DIM}—${RESET} plan a handoff file · ${contextFrag} · ${resetFrag}`;
+    case "RESET":
+    default: {
+      const head = m.overContext
+        ? `${RED}${BOLD}⚠ HANDOFF AND ${clearCaps}${RESET}`
+        : `${RED}${BOLD}⚠ ${clearCaps}${RESET}`;
+      return `${head} ${DIM}—${RESET} ${contextFrag} · ${resetFrag}`;
+    }
+  }
+}
+
 function renderDashboard(metrics, session, rc, profile, hud = {}) {
   if (!metrics) {
     process.stdout.write(CLR_SCR);
@@ -519,88 +574,84 @@ function renderDashboard(metrics, session, rc, profile, hud = {}) {
   const m = metrics;
   const cmds = profile.commands;
 
-  // Burn + acceleration
-  const burnSign = m.burnRate >= 0 ? "+" : "";
-  const burnStr = `${burnSign}${fmtTokens(Math.round(m.burnRate))}/call`;
+  // Acceleration arrow
   let accelArrow = "";
-  if (m.acceleration > 100) accelArrow = ` ${RED}↑${RESET}`;
-  else if (m.acceleration < -100) accelArrow = ` ${GREEN}↓${RESET}`;
-  else if (m.turnCount >= 10) accelArrow = ` ${DIM}=${RESET}`;
+  if (m.acceleration > 100) accelArrow = `${RED}↑${RESET}`;
+  else if (m.acceleration < -100) accelArrow = `${GREEN}↓${RESET}`;
+  else if (m.turnCount >= 10) accelArrow = `${DIM}=${RESET}`;
 
-  // Compaction ETA — single inline phrase
-  let resetStr;
-  if (m.turnsToCompact === Infinity) resetStr = `${GREEN}no pressure${RESET}`;
-  else if (m.turnsToCompact < 10) resetStr = `${BG_RED}${WHITE}${BOLD} reset in ~${m.turnsToCompact} ${RESET}`;
-  else if (m.turnsToCompact < 50) resetStr = `${RED}reset in ~${m.turnsToCompact}${RESET}`;
-  else if (m.turnsToCompact < 200) resetStr = `${YELLOW}reset in ~${m.turnsToCompact}${RESET}`;
-  else resetStr = `${DIM}reset in ~${m.turnsToCompact}${RESET}`;
-
-  // Phase — resolve {{clear}} template
-  const phaseName = m.phase.name.replace("RESET", cmds.clear.replace("/", "").toUpperCase());
-  const phaseAdvice = m.phase.advice.replace("{{clear}}", cmds.clear);
-
-  // Multiplier banner
+  // Multiplier styling — one decimal, color-banded, red bg at ≥5
   const mc = multColor(m.multiplier);
-  const multBanner = m.multiplier >= 5
-    ? `${BG_RED}${WHITE}${BOLD} ×${m.multiplier} per call ${RESET}`
-    : `${mc}${BOLD}×${m.multiplier}${RESET}${DIM} per call${RESET}`;
-  const multRule = `${DIM}${"─".repeat(Math.max(3, String(m.multiplier).length + 1))}${RESET}`;
-  const freshHint = `${DIM}(fresh call: ${fmtCost(m.baselineCostPerCall)})${RESET}`;
+  const multText = `×${m.multiplier.toFixed(1)}`;
+  const multStyled = m.multiplier >= 5
+    ? `${BG_RED}${WHITE}${BOLD} ${multText} ${RESET}`
+    : `${mc}${BOLD}${multText}${RESET}`;
 
-  // Alt providers
-  const altLine = Object.keys(m.comparisons).length > 0
-    ? ` ${DIM}alt${RESET}       ${DIM}${Object.entries(m.comparisons).slice(0, 3).map(([k, v]) => `${providerLabel(k, rc.labels)} ${fmtCost(v)}`).join("  ")}${RESET}`
-    : null;
-
-  // Cache line
-  const cacheLine = ` ${DIM}cache${RESET}     ${m.cacheHitRate.toFixed(0)}% hit${m.cacheNetSavings > 0.01 ? `  ${DIM}ROI${RESET} ${GREEN}+${fmtCost(m.cacheNetSavings)}${RESET}` : ""}  ${DIM}in ${fmtTokens(m.totalBilledInput)} · out ${fmtTokens(m.totalOutput)}${RESET}`;
-
-  // Last call
-  const lastLine = ` ${DIM}last${RESET}      ${DIM}${fmtTokens(m.lastTurn.contextSize)} · ${fmtTokens(m.lastTurn.output)} out · ${m.lastTurn.stopReason}${RESET}`;
-
-  // Header — include project + short session id so user knows what's watched
-  const projectTag = session?.project ? ` ${DIM}·${RESET} ${session.project}` : "";
+  // Header — just agent + short session id, no mangled project path
   const shortId = sessionShortId(session?.filePath);
   const sessionTag = shortId ? ` ${DIM}·${RESET} ${DIM}${shortId}${RESET}` : "";
-  const header = `${BOLD}${CYAN} Agent Token Meter ${RESET}${DIM}v${VERSION}${RESET}  ${DIM}${profile.name}${RESET}${projectTag}${sessionTag}`;
+  const header = `${BOLD}${CYAN} Agent Token Meter ${RESET}${DIM}v${VERSION}${RESET} ${DIM}·${RESET} ${DIM}${profile.name}${RESET}${sessionTag}`;
 
   // Optional transient notice (e.g., auto-follow switched sessions)
   const noticeLine = hud.notice ? ` ${CYAN}${hud.notice}${RESET}` : null;
 
-  // Compaction history — shown only when it happened, as a dim aside
-  const compactHistory = m.compactions.length > 0
-    ? ` ${DIM}compacted ${m.compactions.length}× · last ${fmtTokens(m.compactions[m.compactions.length - 1].before)} → ${fmtTokens(m.compactions[m.compactions.length - 1].after)}${RESET}`
-    : null;
-
-  const W = 52;
+  const W = 60;
   const sepHeavy = `${DIM}${"═".repeat(W)}${RESET}`;
   const sepLight = `${DIM}${"─".repeat(W)}${RESET}`;
+
+  // NOW section
+  const contextPctStr = `${m.contextPct.toFixed(0)}%`;
+  const contextColor = m.overContext ? RED + BOLD : BOLD;
+  const contextLine = ` ${DIM}context${RESET}      ${fmtTokens(m.currentContext)} / ${fmtTokens(m.usableContext)}         ${contextColor}${contextPctStr}${RESET}`;
+  const burnLine = ` ${DIM}burn${RESET}         ${MAGENTA}${m.burnRate >= 0 ? "+" : ""}${Math.round(m.burnRate)}${RESET} ${DIM}tok/call${RESET}${accelArrow ? ` ${accelArrow}` : ""}`;
+  const lastTurnLine = ` ${DIM}last turn${RESET}    ${DIM}${fmtTokens(m.lastTurn.contextSize)} in · ${fmtTokens(m.lastTurn.output)} out · ${m.lastTurn.stopReason}${RESET}`;
+
+  // IF YOU CLEAR section — only when there's meaningful savings
+  const clearCaps = cmds.clear.replace("/", "").toUpperCase();
+  const clearSection = m.savedPerCall > 0.005 ? [
+    sepLight,
+    ` ${DIM}IF YOU ${clearCaps}${RESET}`,
+    ` ${DIM}per call${RESET}     ${GREEN}save ${fmtCost(m.savedPerCall)}${RESET}`,
+    ` ${DIM}next ${CLEAR_LOOKAHEAD}${RESET}      ${GREEN}save ~${fmtCost(m.savingsOverLookahead)}${RESET}`,
+    ` ${DIM}steps${RESET}        ${DIM}write handoff → ${cmds.clear} → reload with plan${RESET}`,
+  ] : null;
+
+  // SESSION section
+  const sessionParts = [`${BOLD}${GREEN}${fmtCost(m.totalCost)}${RESET}`, `${m.userTurnCount} turns`];
+  if (m.durationMs > 0) sessionParts.push(fmtDuration(m.durationMs));
+  if (m.costPerHour > 0) sessionParts.push(`${fmtCost(m.costPerHour)}/hr`);
+  const spendLine = ` ${DIM}spend${RESET}        ${sessionParts.map((p, i) => i === 0 ? p : DIM + p + RESET).join(` ${DIM}·${RESET} `)}`;
+
+  const cacheParts = [`${m.cacheHitRate.toFixed(0)}% hit`];
+  if (m.cacheNetSavings > 0.01) cacheParts.push(`saved ${GREEN}${fmtCost(m.cacheNetSavings)}${RESET}`);
+  cacheParts.push(`${fmtTokens(m.totalBilledInput)} in`);
+  cacheParts.push(`${fmtTokens(m.totalOutput)} out`);
+  const cacheLine = ` ${DIM}cache${RESET}        ${DIM}${cacheParts.join(" · ")}${RESET}`;
+
+  const altLine = Object.keys(m.comparisons).length > 0
+    ? ` ${DIM}alt models${RESET}   ${DIM}${Object.entries(m.comparisons).slice(0, 3).map(([k, v]) => `${providerLabel(k, rc.labels)} ${fmtCost(v)}`).join("   ")}${RESET}`
+    : null;
 
   const lines = [
     "",
     header,
     noticeLine,
     sepHeavy,
-    "",
-    `   ${multBanner}          ${BOLD}${fmtCost(m.avgCostPerTurn)}${RESET} ${DIM}each${RESET}`,
-    `   ${multRule}           ${freshHint}`,
-    "",
-    ` ${DIM}context${RESET}   ${bar(m.contextPct)}  ${BOLD}${m.contextPct.toFixed(0)}%${RESET}  ${DIM}${fmtTokens(m.currentContext)} of ${fmtTokens(m.usableContext)}${RESET}`,
-    ` ${DIM}burn${RESET}      ${MAGENTA}${burnStr}${RESET}${accelArrow}   ${resetStr}`,
-    ` ${DIM}session${RESET}   ${m.userTurnCount} turns ${DIM}·${RESET} ${m.durationMs > 0 ? fmtDuration(m.durationMs) + " " + DIM + "·" + RESET + " " : ""}${BOLD}${GREEN}${fmtCost(m.totalCost)}${RESET}${m.costPerHour > 0 ? `  ${DIM}${fmtCost(m.costPerHour)}/hr${RESET}` : ""}`,
-    compactHistory,
-    "",
+    ` ${DIM}MULTIPLIER${RESET}   ${multStyled}${accelArrow ? " " + accelArrow : ""}        ${BOLD}${fmtCost(m.avgCostPerTurn)}${RESET} ${DIM}now${RESET}   ${DIM}${fmtCost(m.baselineCostPerCall)} fresh${RESET}`,
+    ` ${buildPhaseBanner(m, cmds)}`,
+    sepHeavy,
+    ` ${DIM}NOW${RESET}`,
+    contextLine,
+    burnLine,
+    lastTurnLine,
+    ...(clearSection || []),
     sepLight,
-    ` ${m.phase.color}${BOLD}${phaseName}${RESET}  ${DIM}${phaseAdvice}${RESET}`,
-    m.savedPerCall > 0.005
-      ? ` ${DIM}${cmds.clear}${RESET}${" ".repeat(Math.max(1, 10 - cmds.clear.length))}${GREEN}saves ${fmtCost(m.savedPerCall)}/call${RESET}  ${DIM}(~${fmtCost(m.savingsOverLookahead)} over next ${CLEAR_LOOKAHEAD})${RESET}`
-      : ` ${DIM}${cmds.clear}${RESET}${" ".repeat(Math.max(1, 10 - cmds.clear.length))}${DIM}no significant savings yet${RESET}`,
-    "",
+    ` ${DIM}SESSION${RESET}`,
+    spendLine,
     cacheLine,
     altLine,
-    lastLine,
     sepHeavy,
-    `${DIM} Watching… Ctrl+C to exit${RESET}`,
+    `${DIM} Watching · Ctrl+C to exit${RESET}`,
   ].filter(l => l != null);
 
   process.stdout.write(CLR_SCR);
