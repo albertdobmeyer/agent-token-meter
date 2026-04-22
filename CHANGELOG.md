@@ -4,6 +4,11 @@ All notable changes to **agent-token-meter** are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] — 2026-04-22
+
+### Documentation
+- README documents the 1.2.2 session-rollover hint: new row in the startup-slides table and a dedicated "Session rollovers" subsection explaining when the slide fires, why the meter reports per-segment instead of aggregating across `.jsonl` files, and how to pivot between segments via `--sessions` / `--session` / `--all`.
+
 ## [1.2.2] — 2026-04-22
 
 ### Added
@@ -55,6 +60,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Support for Claude Code via `~/.claude/projects/` JSONL logs.
 - `--install-hooks` / `--uninstall-hooks` for in-context threshold nudges at 50/75/90%.
 
+[1.2.3]: https://github.com/albertdobmeyer/agent-token-meter/releases/tag/v1.2.3
 [1.2.2]: https://github.com/albertdobmeyer/agent-token-meter/releases/tag/v1.2.2
 [1.2.1]: https://github.com/albertdobmeyer/agent-token-meter/releases/tag/v1.2.1
 [1.2.0]: https://github.com/albertdobmeyer/agent-token-meter/releases/tag/v1.2.0
