@@ -4,6 +4,12 @@ All notable changes to **agent-token-meter** are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.5] — 2026-04-22
+
+### Added
+- `SECURITY.md` with a private-disclosure policy, scope statement, verification instructions (`npm audit signatures`), and a summary of the package's security posture.
+- README badges for monthly downloads, signed provenance (linking to `SECURITY.md#verifying-a-release`), and zero dependencies.
+
 ## [1.2.4] — 2026-04-22
 
 ### Security
@@ -72,6 +78,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Support for Claude Code via `~/.claude/projects/` JSONL logs.
 - `--install-hooks` / `--uninstall-hooks` for in-context threshold nudges at 50/75/90%.
 
+[1.2.5]: https://github.com/albertdobmeyer/agent-token-meter/releases/tag/v1.2.5
 [1.2.4]: https://github.com/albertdobmeyer/agent-token-meter/releases/tag/v1.2.4
 [1.2.3]: https://github.com/albertdobmeyer/agent-token-meter/releases/tag/v1.2.3
 [1.2.2]: https://github.com/albertdobmeyer/agent-token-meter/releases/tag/v1.2.2

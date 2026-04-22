@@ -1,6 +1,6 @@
 # Agent Token Meter
 
-[![npm version](https://img.shields.io/npm/v/agent-token-meter)](https://www.npmjs.com/package/agent-token-meter) [![CI](https://github.com/albertdobmeyer/agent-token-meter/actions/workflows/ci.yml/badge.svg)](https://github.com/albertdobmeyer/agent-token-meter/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![npm version](https://img.shields.io/npm/v/agent-token-meter)](https://www.npmjs.com/package/agent-token-meter) [![npm downloads](https://img.shields.io/npm/dm/agent-token-meter)](https://www.npmjs.com/package/agent-token-meter) [![CI](https://github.com/albertdobmeyer/agent-token-meter/actions/workflows/ci.yml/badge.svg)](https://github.com/albertdobmeyer/agent-token-meter/actions/workflows/ci.yml) [![signed with provenance](https://img.shields.io/badge/signed-provenance-brightgreen)](https://github.com/albertdobmeyer/agent-token-meter/blob/main/SECURITY.md#verifying-a-release) [![zero deps](https://img.shields.io/badge/deps-0-brightgreen)](https://github.com/albertdobmeyer/agent-token-meter/blob/main/package.json) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **A speedometer for your context window.** Zero dependencies. Single file. Answers one question: *should I reset my context right now?*
 

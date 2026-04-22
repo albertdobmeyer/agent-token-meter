@@ -1,6 +1,6 @@
 {
   "name": "agent-token-meter",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "Zero-dependency burn-rate monitor for AI coding agents. Context tax, workflow phases, acceleration, compaction ETA, threshold hooks, and automatic nudges at 50/75/90% context fill. Currently supports Claude Code.",
   "type": "module",
   "bin": {
