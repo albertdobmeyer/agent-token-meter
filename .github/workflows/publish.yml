@@ -1,0 +1,49 @@
+name: Publish to npm
+
+# Publishes on a v* tag push. The NPM_TOKEN secret lives in repo
+# settings — no credentials in code, chat, or README.
+# Provenance attaches a signed SLSA attestation so consumers can verify
+# the tarball was built from this repo at this commit via
+# `npm audit signatures` or the sigstore transparency log.
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # required for npm --provenance (OIDC attestation)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify tag matches package.json version
+        shell: bash
+        run: |
+          pkg_version=$(node -p "require('./package.json').version")
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$pkg_version" != "$tag_version" ]; then
+            echo "::error::Tag v$tag_version does not match package.json version $pkg_version"
+            exit 1
+          fi
+          echo "Publishing agent-token-meter@$pkg_version from tag $GITHUB_REF_NAME"
+
+      - name: Sanity checks
+        run: |
+          node --check token-meter.mjs
+          node --check hook.mjs
+          node token-meter.mjs --version
+          node token-meter.mjs --help > /dev/null
+          node token-meter.mjs --agents > /dev/null
+
+      - name: Publish with provenance
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

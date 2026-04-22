@@ -4,6 +4,18 @@ All notable changes to **agent-token-meter** are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] — 2026-04-22
+
+### Security
+- **Atomic settings.json writes.** Hook install/uninstall now writes to `settings.json.tmp` and renames into place, preventing concurrent-write clobbering if Claude Code is editing `~/.claude/settings.json` at the same moment. Same-directory rename is atomic on both Windows and POSIX.
+- **Exact-path hook matching.** Install/uninstall now identifies token-meter entries by the installed hook filename (`token-meter-hook.mjs`) instead of a loose `"token-meter"` substring match. Closes a silent-deletion edge case where an unrelated user hook containing the string "token-meter" could be removed on uninstall.
+
+### Infrastructure
+- **Publish via GitHub Actions with SLSA provenance.** Releases now trigger on a `v*` tag push; the `publish.yml` workflow authenticates via a repo secret and calls `npm publish --provenance`, attaching a signed attestation tying each tarball to its source commit. Consumers can verify via `npm audit signatures`. No npm tokens ever touch local machines, chat, or documentation during a release. See `CONTRIBUTING.md` for the one-time setup.
+
+### Changed
+- `VERSION` now reads from `package.json` at runtime instead of being a separately-maintained constant — single source of truth, no drift.
+
 ## [1.2.3] — 2026-04-22
 
 ### Documentation
@@ -60,6 +72,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Support for Claude Code via `~/.claude/projects/` JSONL logs.
 - `--install-hooks` / `--uninstall-hooks` for in-context threshold nudges at 50/75/90%.
 
+[1.2.4]: https://github.com/albertdobmeyer/agent-token-meter/releases/tag/v1.2.4
 [1.2.3]: https://github.com/albertdobmeyer/agent-token-meter/releases/tag/v1.2.3
 [1.2.2]: https://github.com/albertdobmeyer/agent-token-meter/releases/tag/v1.2.2
 [1.2.1]: https://github.com/albertdobmeyer/agent-token-meter/releases/tag/v1.2.1

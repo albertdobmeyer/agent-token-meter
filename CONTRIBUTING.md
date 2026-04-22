@@ -63,6 +63,42 @@ No build step, no dependencies to install. Just Node.js 18+.
 - **Test with real data.** Run the meter against an actual session log before submitting.
 - **Keep it fast.** The dashboard refreshes on every file change. The hook script must stay under ~50ms.
 
+## Releasing (maintainers)
+
+Releases publish via GitHub Actions on a `v*` tag push. No npm tokens ever touch a laptop, chat, or the README — the workflow authenticates via a repo secret and attaches [SLSA provenance](https://docs.npmjs.com/generating-provenance-statements) so consumers can verify the tarball was built from this repo.
+
+**One-time setup** (per repo, ~2 minutes):
+
+1. On npmjs.com, generate a **Granular Access Token** scoped to the `agent-token-meter` package with:
+   - Permissions: **Read and write**
+   - Packages: `agent-token-meter`
+   - Expiration: 90 days (shorter is better; rotate on expiry)
+2. Add it to the repo: GitHub → Settings → Secrets and variables → Actions → **New repository secret** → name `NPM_TOKEN`, value the token. The secret is never exposed in workflow logs.
+
+**Per-release workflow:**
+
+```bash
+# Bump the version (patch / minor / major) — creates a commit and tag
+npm version patch -m "Release v%s"
+
+# Push both the commit and the tag. The tag push triggers publish.yml.
+git push --follow-tags origin main
+```
+
+Watch the run under **Actions** in GitHub. The workflow:
+
+1. Checks that the tag matches `package.json` version (fails fast on mismatch).
+2. Runs syntax and CLI smoke checks.
+3. Publishes with `--provenance` — npm stores a cryptographic attestation linking the tarball to this exact commit and CI run.
+
+After publish, users can verify:
+
+```bash
+npm audit signatures
+```
+
+**Version is sourced from `package.json`** at runtime (token-meter.mjs), so `npm version` is the single source of truth — no separate constant to keep in sync.
+
 ## Reporting issues
 
 Open an issue on GitHub with:

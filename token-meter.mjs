@@ -18,8 +18,14 @@ import path from "path";
 import os from "os";
 import { fileURLToPath } from "url";
 
-const VERSION = "1.2.3";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// VERSION is sourced from package.json so a single bump stays in sync
+// across dashboard header, --version, help text, and the npm tarball.
+const VERSION = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8")).version;
+  } catch { return "0.0.0"; }
+})();
 
 // ── Agent Profiles ───────────────────────────────────────────────────
 // Each profile defines everything agent-specific. To add a new agent,
@@ -799,6 +805,28 @@ ${BOLD}Setup:${RESET}
 
 // ── Hook installer ───────────────────────────────────────────────────
 
+// Write settings atomically via tmp-file + rename. Claude Code may be
+// writing to settings.json concurrently; a naive read→mutate→write
+// clobbers unrelated hook entries on race. Same-directory rename is
+// atomic on Windows and POSIX.
+function writeSettingsAtomic(settingsPath, settings) {
+  const tmp = settingsPath + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(settings, null, 2));
+  fs.renameSync(tmp, settingsPath);
+}
+
+// Identify our hook entries by the hook filename we installed, not by
+// a "token-meter" substring — the substring match could silently
+// delete an unrelated user hook whose command happens to contain that
+// string. `hookFileName` is specific enough that only our entries hit.
+function isTokenMeterHook(entry, hookFileName) {
+  return Array.isArray(entry?.hooks) && entry.hooks.some(h =>
+    h?.type === "command" &&
+    typeof h?.command === "string" &&
+    h.command.includes(hookFileName)
+  );
+}
+
 function installHooks(profile) {
   if (!profile.hook?.supported) {
     console.error(`\n${RED}Hooks are not supported for ${profile.name}.${RESET}`);
@@ -829,9 +857,9 @@ function installHooks(profile) {
   if (!settings.hooks) settings.hooks = {};
   if (!settings.hooks[hk.hookEvent]) settings.hooks[hk.hookEvent] = [];
 
-  // Remove any existing token-meter hook entry
+  // Remove any prior token-meter entry so reinstall replaces cleanly
   settings.hooks[hk.hookEvent] = settings.hooks[hk.hookEvent].filter(
-    h => !JSON.stringify(h).includes("token-meter")
+    h => !isTokenMeterHook(h, hk.hookFileName)
   );
 
   // Add hook — use forward slashes for bash compatibility
@@ -841,7 +869,7 @@ function installHooks(profile) {
     hooks: [{ type: "command", command: hookCmd }],
   });
 
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  writeSettingsAtomic(settingsPath, settings);
 
   console.log(`\n${GREEN}✓${RESET} Token Meter hooks installed for ${BOLD}${profile.name}${RESET}\n`);
   console.log(`  ${DIM}Hook:${RESET}     ${hookDest}`);
@@ -874,11 +902,11 @@ function uninstallHooks(profile) {
     const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
     if (settings.hooks?.[hk.hookEvent]) {
       settings.hooks[hk.hookEvent] = settings.hooks[hk.hookEvent].filter(
-        h => !JSON.stringify(h).includes("token-meter")
+        h => !isTokenMeterHook(h, hk.hookFileName)
       );
       if (settings.hooks[hk.hookEvent].length === 0) delete settings.hooks[hk.hookEvent];
       if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
-      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+      writeSettingsAtomic(settingsPath, settings);
     }
   } catch {}
 
