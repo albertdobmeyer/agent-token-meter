@@ -173,6 +173,7 @@ A transient cyan line at the **bottom** of the dashboard cycles through 2–4 st
 | `watching: <cwd or project> · <short id>` | Always |
 | `follow mode on · switches to newest in this project after 30s idle` | Default mode |
 | `+N other active in this project · --sessions to list · --session <id> to pin` | Multiple sessions open in the same project |
+| `new session segment · prior <id> (2.8MB, 26m ago) · metrics cover this segment only` | Claude Code just rolled over to a fresh `.jsonl` — a long conversation now lives across two files |
 | `pinned to <id> · auto-follow off` | `--no-follow` or `--session` is active |
 | `→ switched to <project> · <id>` | Auto-follow just jumped (one-shot notice) |
 
@@ -192,6 +193,24 @@ With cwd-scoping, you can safely run one meter per project in separate terminal 
 **Orphan protection:** the meter polls `process.ppid` every 5 seconds and exits if the launching shell is gone. It also exits on stdin end/close. On Windows this fixes the long-standing problem where killing the `npx` wrapper leaves the grandchild `node.exe` running forever — closing your terminal now cleanly takes the meter down with it.
 
 **For agents:** if your agent reads the meter output (e.g. via `tee` to a log file), it can compare the short session id in the header against its own session file to confirm the numbers belong to *its* conversation. A mismatch means the meter is watching a sibling session.
+
+### Session rollovers
+
+Claude Code doesn't always append a conversation to the same `.jsonl`. Starting a new session in the same `cwd` — via `/resume`, `claude --continue`, a fresh `claude` invocation, or recovery after a crash — opens a **new** session file that picks up from a handoff while the prior file sits stale on disk. The meter always watches one file at a time, so after a rollover it reports on the *new* segment only. A multi-hour conversation can briefly look like a short one until the new file grows.
+
+The meter detects this pattern at startup and queues a slide so the scope isn't ambiguous:
+
+```
+new session segment · prior fa7a76de (2.8MB, 26m ago) · metrics cover this segment only
+```
+
+The slide fires when the current file has **≤5 user turns** *and* a sibling `.jsonl` **≥100KB** exists in the same project directory. No aggregation happens — the numbers stay faithful to the live file; the slide just makes the scope explicit. To inspect the prior segment, jump to it, or see cumulative cost across every segment:
+
+```bash
+npx agent-token-meter --sessions              # list recent sessions in this project
+npx agent-token-meter --session fa7a76de      # lock to the prior segment
+npx agent-token-meter --all                   # cost summary across every session in this project
+```
 
 ### Terminal setup
 
