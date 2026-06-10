@@ -1,0 +1,17 @@
+# Socket.dev configuration — https://docs.socket.dev/docs/socket-yml
+version: 2
+
+issueRules:
+  # Disable the low-severity, informational "URL strings" alert.
+  #
+  # This alert fires because the bundled Markdown (README badges, the repo
+  # link, the screenshot, and the source attributions in CREDITS.md /
+  # the-hidden-constraint.md) contains hardcoded URLs. Every one is a static
+  # documentation or attribution link, not a runtime endpoint.
+  #
+  # The executable files (token-meter.mjs, hook.mjs, protocol.mjs) contain no
+  # hardcoded network endpoints, and the tool makes no network calls at
+  # runtime (see "Privacy posture" in SECURITY.md) — so there is nothing an
+  # embedded URL could reach. Reviewed and accepted as a false positive; see
+  # "Automated scanner findings (reviewed & accepted)" in SECURITY.md.
+  urlStrings: false

@@ -61,6 +61,17 @@ The attestation cryptographically ties the tarball to a specific commit in this 
 - **GitHub Actions pinned to commit SHAs.** Every external Action used in `ci.yml` and `publish.yml` is pinned to a specific commit hash (with a comment indicating the matching version tag). A compromise of an upstream Action's tag cannot affect us until we explicitly review and update the pinned SHA. Updates ride through Dependabot or a deliberate maintainer change.
 - **Signed git tags for releases.** Release tags (`v*`) are GPG- or SSH-signed by the maintainer. Combined with SLSA provenance and the tag-version-matches-package.json check in the publish workflow, this creates a three-step chain: signed tag → CI verifies tag = package.json version → npm `--provenance` attestation links the published tarball to the commit. Tampering with the published tarball or its provenance is caught by `npm audit signatures`; tampering with the source tag itself is caught by `git tag --verify`. The two checks are independent — together they cover the full chain.
 
+## Automated scanner findings (reviewed & accepted)
+
+Third-party supply-chain scanners (e.g., [Socket.dev](https://socket.dev)) raise a low-severity, **informational** `URL strings` alert against this package. This is expected and benign — it is not a vulnerability.
+
+The alert fires because the bundled documentation contains hardcoded URLs. Every one of them is a static documentation or attribution link:
+
+- **`README.md`** — npm, CI, license, signed-provenance, and deps-0 status badges; the repository link; and the terminal screenshot.
+- **`CREDITS.md`** / **`the-hidden-constraint.md`** — source attributions: the arXiv papers, articles, and Claude Code docs that informed the design.
+
+These strings appear only in Markdown that ships for human reading. The executable code (`token-meter.mjs`, `hook.mjs`, `protocol.mjs`) contains no hardcoded network endpoints, and — as noted under **Privacy posture** — the tool **makes no network calls at runtime**. There is nothing for an embedded URL to exfiltrate to. Removing these links would strip legitimate attribution and security badges without improving the actual supply-chain posture, so the finding is reviewed and accepted as a false positive rather than suppressed by deleting the links.
+
 ## Privacy posture
 
 Because the meter watches an AI-coding session, users have reasonably asked what the tool itself learns about them. The short answer: nothing leaves your machine.
