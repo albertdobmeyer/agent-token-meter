@@ -68,7 +68,14 @@ function loadState() {
 }
 
 function saveState(s) {
-  try { fs.writeFileSync(STATE, JSON.stringify(s)); } catch {}
+  // tmp+rename so a second hook process (concurrent session) can't read a
+  // half-written state file and lose per-session fired-threshold tracking;
+  // the pid in the tmp name keeps two concurrent writers from colliding.
+  try {
+    const tmp = `${STATE}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(s));
+    fs.renameSync(tmp, STATE);
+  } catch {}
 }
 
 function readHookPayload() {
@@ -239,7 +246,10 @@ function handleSessionStart(payload) {
   try {
     const files = fs.readdirSync(cwd);
     for (const f of files) {
-      if (!f.startsWith("handoff-") || !f.endsWith(".md")) continue;
+      // Strict pattern — only well-formed handoff filenames. A crafted name
+      // (spaces, parens, quotes, newlines) is rejected, so nothing arbitrary
+      // from the filesystem reaches the agent's additionalContext below.
+      if (!/^handoff-[\w.-]+\.md$/.test(f)) continue;
       const fp = path.join(cwd, f);
       try {
         const stat = fs.statSync(fp);

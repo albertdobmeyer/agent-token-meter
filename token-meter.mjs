@@ -304,7 +304,7 @@ function parseSession(filePath) {
   try {
     content = fs.readFileSync(filePath, "utf8");
   } catch (e) {
-    return { turns: [], userTurns: [], compactions: [], model: "unknown", project: "", filePath };
+    return { turns: [], userTurns: 0, compactions: [], model: "unknown", project: "", filePath };
   }
 
   const lines = content.split("\n");
@@ -892,12 +892,20 @@ ${BOLD}Setup:${RESET}
 
 // Write settings atomically via tmp-file + rename. Claude Code may be
 // writing to settings.json concurrently; a naive read→mutate→write
-// clobbers unrelated hook entries on race. Same-directory rename is
-// atomic on Windows and POSIX.
+// clobbers unrelated hook entries on race. Same-directory rename replaces
+// in one step on POSIX and NTFS. The tmp name carries the pid so two
+// concurrent writers don't collide on it; on rename failure (e.g. the
+// target is briefly open on Windows) we clean up the tmp file rather than
+// leave it stranded in ~/.claude/.
 function writeSettingsAtomic(settingsPath, settings) {
-  const tmp = settingsPath + ".tmp";
+  const tmp = `${settingsPath}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(settings, null, 2));
-  fs.renameSync(tmp, settingsPath);
+  try {
+    fs.renameSync(tmp, settingsPath);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch {}
+    throw e;
+  }
 }
 
 // Identify our hook entries by the hook filename we installed, not by

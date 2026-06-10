@@ -11,7 +11,7 @@ Agent Token Meter watches your coding agent's session and shows you the burn rat
 ![Agent Token Meter dashboard](https://raw.githubusercontent.com/albertdobmeyer/agent-token-meter/main/agent-token-meter-terminal-screenshot.png)
 
 ```
- Agent Token Meter v1.4.0 · Claude Code
+ Agent Token Meter v1.4.4 · Claude Code
  agent-token-meter · 80ff748f
 ════════════════════════════════════════════════════════════
  MULTIPLIER   ×15.7 ↑   $0.88 now   $0.05 fresh
@@ -124,10 +124,10 @@ Currently supported for: **Claude Code**.
 
 | Threshold | Nudge |
 |---|---|
-| **50%** | `[Token Meter] Context 50%. Reasoning still sharp — start drafting the handoff (decisions, constraints, open threads).` |
-| **75%** | `[Token Meter] Context 75%. Drift zone — finish the handoff file now while curation is still cheap. Prepare to /clear.` |
-| **90%** | `[Token Meter] Context 90%. ~$X.XX/call tax + attention degrading. /clear and reload from the handoff — don't let /compact summarize under pressure.` |
-| **Compaction** | `[Token Meter] Compaction detected (Nx). Context reset to X%. Position bias reset to fresh; thresholds re-armed.` |
+| **50%** | `[Token Meter] Context 50%. Reasoning still sharp — start drafting the handoff at ./handoff-<id>.md (per AGENT-PROTOCOL.md if present).` |
+| **75%** | `[Token Meter] Context 75%. Drift zone — finish ./handoff-<id>.md now while curation is still cheap. Prepare to request /clear from the user.` |
+| **90%** | `[Token Meter] Context 90%. ~$X.XX/call tax + attention degrading. Confirm ./handoff-<id>.md is complete, then ask the user to /clear and reload by saying "continue from ./handoff-<id>.md".` |
+| **Compaction** | `[Token Meter] Compaction detected (Nx). Context reset to X%. Position bias reset to fresh; thresholds re-armed. Write a fresh ./handoff-<id>.md now — the auto-summary is a fallback, not a substitute.` |
 
 Each threshold fires **once per session**. When auto-compaction happens, thresholds above the new fill level are re-armed. The nudges aren't budget alarms — they're cues at the points where the cost of *not* curating starts to outweigh the cost of curating.
 
@@ -280,7 +280,7 @@ The meter watches **one session at a time, scoped to your current working direct
 The dashboard header shows both the project directory name and the short session id:
 
 ```
-Agent Token Meter v1.4.0 · Claude Code
+Agent Token Meter v1.4.4 · Claude Code
 agent-token-meter · 6cfb4866
 ```
 

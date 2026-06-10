@@ -4,6 +4,28 @@ All notable changes to **agent-token-meter** are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.4] — 2026-06-10
+
+### Fixed
+- **`parseSession` read-error path returned `userTurns: []` (an array) instead of `0`.** Every other path treats `userTurns` as a number; the array leaked into the rollover-cap check (`(session.userTurns || 0) <= ROLLOVER_TURN_CAP`), where a truthy empty array coerces to `0` and could spuriously trigger the rollover hint for an unreadable session. Now returns `0`. (`token-meter.mjs`)
+- **Hook state file (`token-meter-hook-state.json`) is now written atomically (tmp + rename).** A plain `writeFileSync` could be read half-written by a second hook process from a concurrent session, resetting per-session `fired` state and re-firing already-crossed thresholds. Now matches the tmp+rename pattern already used for `settings.json`, with a pid-stamped tmp name so concurrent writers don't collide. (`hook.mjs`)
+- **`settings.json` atomic write hardened.** Pid-stamped tmp name; on a rename failure (e.g. the target briefly open on Windows) the tmp file is cleaned up instead of stranded in `~/.claude/`. (`token-meter.mjs`)
+
+### Security
+- **SessionStart bootstrap nudge no longer reflects arbitrary filesystem names into the agent's context.** Handoff-file discovery now requires a strict `handoff-<name>.md` pattern, so a crafted filename carrying prompt-injection text (spaces, parens, quotes) is rejected rather than interpolated into `additionalContext`. Closes the in-scope prompt-injection vector named in the SECURITY.md threat model. (`hook.mjs`)
+
+### Docs
+- **`SECURITY.md` write-path count corrected from "six" to "five".** The v1.4.2 "four → six" fix over-counted by including `~/.claude/token-meter.json`, which is read-only config (and already listed under read-only paths). The Scope section now enumerates only the five real write paths.
+- **`SECURITY.md` hook-matching claim corrected.** It previously said matching was "exact … never a substring match"; the implementation matches the full installed filename (`token-meter-hook.mjs`) as a containment check. The wording now describes what the code does while keeping the real guarantee (the bare `token-meter` token is not matched).
+- **README "What the agent sees" nudge table synced to the actual hook strings** — the 50/75/90% and compaction rows now show the `./handoff-<id>.md` filenames the hook emits (the table still showed pre-v1.4 strings).
+- **README dashboard mockups bumped from `v1.4.0` to `v1.4.4`.**
+
+### Changed
+- **CI: Dependabot bumped the SHA-pinned GitHub Actions** — `actions/checkout` 4.3.1 → 6.0.2 and `actions/setup-node` 4.4.0 → 6.4.0, per the SHA-pinning supply-chain policy documented in SECURITY.md.
+
+### Why
+A full pre-release codebase sweep (three focused reviewers plus line-by-line verification). It surfaced two real code bugs (`userTurns` type, non-atomic hook state), one in-scope prompt-injection hardening, and several documentation claims that had drifted from the implementation. No change to the dashboard, the wire format, or the hook's normal behavior.
+
 ## [1.4.3] — 2026-05-19
 
 ### Changed
@@ -163,6 +185,7 @@ No behavior change to read-only telemetry, session-file watching, or the cost-mu
 - Support for Claude Code via `~/.claude/projects/` JSONL logs.
 - `--install-hooks` / `--uninstall-hooks` for in-context threshold nudges at 50/75/90%.
 
+[1.4.4]: https://github.com/albertdobmeyer/agent-token-meter/releases/tag/v1.4.4
 [1.4.3]: https://github.com/albertdobmeyer/agent-token-meter/releases/tag/v1.4.3
 [1.4.2]: https://github.com/albertdobmeyer/agent-token-meter/releases/tag/v1.4.2
 [1.4.1]: https://github.com/albertdobmeyer/agent-token-meter/releases/tag/v1.4.1

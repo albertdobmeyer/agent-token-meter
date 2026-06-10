@@ -1,6 +1,6 @@
 {
   "name": "agent-token-meter",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "description": "Burn-rate meter for AI coding agents. Surfaces quadratic session cost and reasoning-workspace drift; nudges curated handoffs at 50/75/90% via a bundled agent protocol so context resets at position 0 instead of /compact summarizing under pressure. Zero deps. Claude Code.",
   "type": "module",
   "bin": {
